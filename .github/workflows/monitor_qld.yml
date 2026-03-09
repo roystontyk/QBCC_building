@@ -27,7 +27,7 @@ jobs:
         run: pip install requests beautifulsoup4 lxml
       
       - name: Run QBCC Monitor
-        run: python monitor_qld.py
+        run: python monitor.py
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
