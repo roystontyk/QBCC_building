@@ -1,4 +1,4 @@
-import os, requests, html
+import os, requests, html, re
 from bs4 import BeautifulSoup
 from datetime import datetime
 
@@ -10,54 +10,46 @@ QLD_URL = "https://www.qbcc.qld.gov.au/news-resources/news"
 def send_telegram(text):
     if not text: return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}, timeout=30)
+    requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}, timeout=30)
 
 def get_qld_data():
-    print("🔍 Attempting Stealth Scrape of QBCC...")
+    print("🔍 Cleaning up QLD News Feed...")
     results = []
+    seen_links = set()
     
-    # Use a Session to handle cookies/handshakes like a real browser
     session = requests.Session()
     session.headers.update({
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Referer": "https://www.google.com/"
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
     })
 
     try:
         r = session.get(QLD_URL, timeout=20)
-        # If the site blocks us, this will help us see why in the logs
-        print(f"Response Code: {r.status_code}")
-        
         soup = BeautifulSoup(r.content, "html.parser")
         
-        # In 2026, QBCC wraps news in <h3> tags inside the 'views-element-container'
-        news_titles = soup.find_all(['h3', 'h2'], class_=False) # They often use naked headers for news
+        # Target the news items specifically
+        # QBCC uses 'views-row' for each news card
+        rows = soup.select('.views-row')
         
-        if not news_titles:
-            # Fallback: Just grab every link in the main content area
-            main_content = soup.find('main')
-            news_titles = main_content.find_all('a', href=True) if main_content else []
-
-        for item in news_titles:
-            # If item is a header, find the link inside it
-            link_tag = item if item.name == 'a' else item.find('a', href=True)
+        for row in rows:
+            link_tag = row.find('a', href=True)
             if not link_tag: continue
             
-            title = link_tag.get_text().strip()
+            # Clean up the title: remove "Read More", extra dates, and "Article |" prefixes
+            raw_text = link_tag.get_text(separator=' ').strip()
+            # This regex clears out the "Read More" and the duplicate date/type info
+            clean_title = re.sub(r'(Read More|Article|News|Campaign|\| \d+ \w+ \d{4})', '', raw_text, flags=re.IGNORECASE).strip()
+            # Collapse multiple spaces
+            clean_title = ' '.join(clean_title.split())
+            
             link = link_tag['href']
-            
-            # Filter out utility links
-            if len(title) < 15 or link.startswith('#') or "node/" in link:
-                continue
-            
             full_url = link if link.startswith("http") else f"https://www.qbcc.qld.gov.au{link}"
             
-            # Avoid duplicates
-            entry = f"• <b>[📰 QLD]</b> {html.escape(title)}\n🔗 {full_url}"
-            if entry not in results:
-                results.append(entry)
+            # Skip noise and duplicates
+            if len(clean_title) < 15 or full_url in seen_links or "/news-resources" in full_url:
+                continue
+            
+            results.append(f"• <b>[📰 QLD]</b> {html.escape(clean_title)}\n🔗 {full_url}")
+            seen_links.add(full_url)
 
     except Exception as e:
         print(f"Scraper error: {e}")
@@ -70,17 +62,10 @@ def main():
     headlines = get_qld_data()
     header = f"☀️ <b>QBCC Queensland Update</b>\n📅 {datetime.now().strftime('%d %b %Y')}\n\n"
     
-    # If the scraper still finds nothing, we provide a "Quick Access" list 
-    # so you can at least click through manually from Telegram.
     if headlines:
-        body = "\n\n".join(headlines[:8])
+        body = "\n\n".join(headlines[:6]) # Show top 6 latest clean items
     else:
-        body = (
-            "⚠️ <b>Direct Access (Bot Blocked):</b>\n"
-            "• <a href='https://www.qbcc.qld.gov.au/news-resources/news'>Latest News Feed</a>\n"
-            "• <a href='https://www.qbcc.qld.gov.au/news-resources/media-releases'>Media Releases</a>\n"
-            "• <a href='https://www.qbcc.qld.gov.au/news-resources/public-warnings'>Public Warnings</a>"
-        )
+        body = "<i>No new QLD headlines found today.</i>"
 
     footer = (
         "\n\n---\n"
