@@ -13,43 +13,50 @@ def send_telegram(text):
     requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}, timeout=30)
 
 def get_qld_data():
-    print("🔍 Cleaning up QLD News Feed...")
+    print("🔍 Triple-checking QBCC News Feed...")
     results = []
     seen_links = set()
     
     session = requests.Session()
+    # High-authority header to avoid being flagged as a bot
     session.headers.update({
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Referer": "https://www.google.com"
     })
 
     try:
         r = session.get(QLD_URL, timeout=20)
         soup = BeautifulSoup(r.content, "html.parser")
         
-        # Target the news items specifically
-        # QBCC uses 'views-row' for each news card
-        rows = soup.select('.views-row')
+        # METHOD 1: Target the 2026 "Latest News" cards
+        items = soup.select('.views-row, article, .news-item, .field-content')
         
-        for row in rows:
-            link_tag = row.find('a', href=True)
+        # METHOD 2: Fallback to all H2/H3 headers in case Method 1 returns empty
+        if not items:
+            items = soup.find_all(['h2', 'h3'])
+
+        for item in items:
+            link_tag = item if item.name == 'a' else item.find('a', href=True)
             if not link_tag: continue
             
-            # Clean up the title: remove "Read More", extra dates, and "Article |" prefixes
-            raw_text = link_tag.get_text(separator=' ').strip()
-            # This regex clears out the "Read More" and the duplicate date/type info
-            clean_title = re.sub(r'(Read More|Article|News|Campaign|\| \d+ \w+ \d{4})', '', raw_text, flags=re.IGNORECASE).strip()
-            # Collapse multiple spaces
-            clean_title = ' '.join(clean_title.split())
-            
             link = link_tag['href']
-            full_url = link if link.startswith("http") else f"https://www.qbcc.qld.gov.au{link}"
-            
-            # Skip noise and duplicates
-            if len(clean_title) < 15 or full_url in seen_links or "/news-resources" in full_url:
+            # Skip non-news links
+            if any(x in link for x in ["#", "/user", "/about-us", "facebook", "twitter"]):
                 continue
-            
-            results.append(f"• <b>[📰 QLD]</b> {html.escape(clean_title)}\n🔗 {full_url}")
-            seen_links.add(full_url)
+
+            full_url = link if link.startswith("http") else f"https://www.qbcc.qld.gov.au{link}"
+            if full_url in seen_links: continue
+
+            # Clean the text
+            text = link_tag.get_text(" ").strip()
+            # Remove "Read More", Dates, and weird spacing
+            clean_title = re.sub(r'(Read More|Article|News|Campaign|\| \d+ \w+ \d{4})', '', text, flags=re.IGNORECASE).strip()
+            clean_title = ' '.join(clean_title.split())
+
+            if len(clean_title) > 15:
+                results.append(f"• <b>[📰 QLD]</b> {html.escape(clean_title)}\n🔗 {full_url}")
+                seen_links.add(full_url)
 
     except Exception as e:
         print(f"Scraper error: {e}")
@@ -62,10 +69,15 @@ def main():
     headlines = get_qld_data()
     header = f"☀️ <b>QBCC Queensland Update</b>\n📅 {datetime.now().strftime('%d %b %Y')}\n\n"
     
+    # If scraper finds nothing, we provide direct one-tap links
     if headlines:
-        body = "\n\n".join(headlines[:6]) # Show top 6 latest clean items
+        body = "\n\n".join(headlines[:6])
     else:
-        body = "<i>No new QLD headlines found today.</i>"
+        body = (
+            "⚠️ <b>Bot detection triggered. Tap to view manually:</b>\n"
+            "➡️ <a href='https://www.qbcc.qld.gov.au/news-resources/news'>Latest News & Warnings</a>\n"
+            "➡️ <a href='https://www.qbcc.qld.gov.au/news-resources/media-releases'>Media Releases</a>"
+        )
 
     footer = (
         "\n\n---\n"
