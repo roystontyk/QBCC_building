@@ -6,54 +6,53 @@ from datetime import datetime
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# The specific QBCC news landing page
-QLD_URLS = [
-    "https://www.qbcc.qld.gov.au/news-resources/news"
-]
+# Primary News Page
+QLD_URL = "https://www.qbcc.qld.gov.au/news-resources/news"
 
 def send_telegram(text):
     if not text: return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     r = requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}, timeout=30)
-    print(f"Telegram response: {r.status_code}")
+    print(f"Telegram status: {r.status_code}")
 
 def get_qld_data():
-    print("🔍 Fetching QLD updates for March 2026...")
+    print("🔍 Scraping QBCC News (March 2026 Layout)...")
     results = []
     seen_links = set()
 
-    for url in QLD_URLS:
-        try:
-            r = requests.get(url, headers={"User-Agent":"Mozilla/5.0"}, timeout=20)
-            soup = BeautifulSoup(r.content, "html.parser")
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        r = requests.get(QLD_URL, headers=headers, timeout=20)
+        soup = BeautifulSoup(r.content, "html.parser")
+        
+        # 2026 Target: Look for news items within list views or tables
+        # The site currently uses 'views-row' and specific link structures for news
+        news_items = soup.select('.views-row, .views-field-title, article')
+        
+        for item in news_items:
+            link_tag = item.find('a', href=True)
+            if not link_tag: continue
             
-            # 2026 QBCC Structure: News items are usually in .views-row or article tags
-            articles = soup.select('.views-row, article, .news-item')
+            title = link_tag.get_text().strip()
+            link = link_tag['href']
             
-            for item in articles:
-                link_tag = item.find('a', href=True)
-                if not link_tag: continue
+            # Filter out navigation/junk
+            if len(title) < 12 or any(x in title.lower() for x in ["read more", "view all", "contact"]):
+                continue
                 
-                title = link_tag.get_text().strip()
-                link = link_tag['href']
+            full_url = link if link.startswith("http") else f"https://www.qbcc.qld.gov.au{link}"
+            
+            if full_url not in seen_links:
+                # Add a visual tag based on URL or text
+                tag = "📰 NEWS"
+                if "media-release" in full_url: tag = "📢 MEDIA"
+                elif "warning" in full_url: tag = "⚠️ WARNING"
                 
-                # Cleanup: Skip short text or common nav items
-                if len(title) < 10 or any(x in title.lower() for x in ["read more", "view all", "contact us"]):
-                    continue
-                
-                full_url = link if link.startswith("http") else f"https://www.qbcc.qld.gov.au{link}"
-                
-                if full_url not in seen_links:
-                    # Identify the type (Article, Media Release, etc.)
-                    tag = "📰 QLD NEWS"
-                    if "media-release" in full_url: tag = "📢 MEDIA"
-                    elif "public-warning" in full_url: tag = "⚠️ WARNING"
-                    
-                    results.append(f"• <b>[{tag}]</b> {html.escape(title)}\n🔗 {full_url}")
-                    seen_links.add(full_url)
+                results.append(f"• <b>[{tag}]</b> {html.escape(title)}\n🔗 {full_url}")
+                seen_links.add(full_url)
 
-        except Exception as e:
-            print(f"Error scraping {url}: {e}")
+    except Exception as e:
+        print(f"Scraper error: {e}")
             
     return results
 
@@ -63,18 +62,18 @@ def main():
         return
 
     headlines = get_qld_data()
-    print(f"Found {len(headlines)} headlines.")
+    print(f"Found {len(headlines)} items.")
 
     header = f"☀️ <b>QBCC Queensland Update</b>\n📅 {datetime.now().strftime('%d %b %Y')}\n\n"
     
     if headlines:
-        body = "\n\n".join(headlines[:15])
+        body = "\n\n".join(headlines[:10]) # Top 10 latest
     else:
-        body = "<i>No new QLD headlines found. Check the direct links below.</i>"
+        body = "<i>No news items found. The site structure may have changed.</i>"
 
     footer = (
         "\n\n---\n"
-        "<b>📂 QLD PERMANENT REGISTERS:</b>\n\n"
+        "<b>📂 QLD PERMANENT REGISTERS:</b>\n"
         "🚫 <b>Excluded Individuals (Banned):</b>\n"
         "https://www.qbcc.qld.gov.au/about-us/our-lists-registers/excluded-individuals-register\n\n"
         "📑 <b>Adjudication Decisions:</b>\n"
