@@ -5,7 +5,8 @@ on:
   repository_dispatch:
     types: [trigger-all-repos]
 
-  # Standard daily schedule (e.g., 7:30 AM Sydney/Brisbane time)
+  # MATCHED: Runs daily at 8:30 AM Melbourne/Sydney Time (AEDT)
+  # 21:30 UTC = 8:30 AM AEDT / 7:30 AM AEST (QLD)
   schedule:
     - cron: '30 21 * * *' 
     
@@ -24,6 +25,7 @@ jobs:
           python-version: '3.11'
       
       - name: Install dependencies
+        # Added lxml to match your other scrapers for consistency
         run: pip install requests beautifulsoup4 lxml
       
       - name: Run QBCC Monitor
@@ -31,3 +33,5 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Standardizes the environment to Brisbane time
+          TZ: 'Australia/Brisbane'
