@@ -1,11 +1,14 @@
 import os, requests, html, re
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, timedelta, timezone # AMENDED
 
 # === CONFIG ===
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 QLD_URL = "https://www.qbcc.qld.gov.au/news-resources/news"
+
+# Local Time Offset (UTC+11)
+LOCAL_TZ = timezone(timedelta(hours=11))
 
 def send_telegram(text):
     if not text: return
@@ -22,7 +25,6 @@ def get_qld_data():
     results = []
     seen_links = set()
     
-    # --- STEALTH LOGIC START ---
     session = requests.Session()
     session.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -33,35 +35,24 @@ def get_qld_data():
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1"
     })
-    # --- STEALTH LOGIC END ---
 
     try:
-        # Initial request to establish session/cookies
         session.get("https://www.qbcc.qld.gov.au/", timeout=15)
-        
-        # Actual page fetch
         r = session.get(QLD_URL, timeout=20)
-        print(f"Response Status: {r.status_code}")
         
         soup = BeautifulSoup(r.content, "html.parser")
-        
-        # Target individual news rows/articles
         articles = soup.select('.views-row, article, .news-item')
         
         for item in articles:
-            # isolate the heading tag specifically to exclude teaser text
             heading_tag = item.find(['h3', 'h2', 'h4'])
             link_tag = item.find('a', href=True)
             
             if not heading_tag or not link_tag:
                 continue
             
-            # Clean up the heading text
             raw_title = heading_tag.get_text().strip()
-            # Regex to remove "Article |", "Media Release |", dates, and "Read More"
             clean_title = re.sub(r'(Article|News|Campaign|Media release|Read More|\| \d+ \w+ \d{4})', '', raw_title, flags=re.IGNORECASE).strip()
             
-            # Re-verify we didn't just grab an empty string or nav link
             if len(clean_title) < 10:
                 continue
                 
@@ -81,10 +72,14 @@ def main():
     if not TELEGRAM_TOKEN or not CHAT_ID: return
     
     headlines = get_qld_data()
-    header = f"☀️ <b>QBCC Queensland Update</b>\n📅 {datetime.now().strftime('%d %b %Y')}\n\n"
+    
+    # --- AMENDED: Force Local Date ---
+    today_local = datetime.now(LOCAL_TZ).strftime('%d %b %Y')
+    header = f"☀️ <b>QBCC Queensland Update</b>\n📅 {today_local}\n\n"
+    # ---------------------------------
     
     if headlines:
-        body = "\n\n".join(headlines[:15]) # Increased to 15 items
+        body = "\n\n".join(headlines[:15]) 
     else:
         body = "<i>No new QLD headings found today (Check Stealth/Session settings).</i>"
 
